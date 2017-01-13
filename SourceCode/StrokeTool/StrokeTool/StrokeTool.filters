@@ -1,0 +1,47 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="Source Files\CMotionPathNode">
+      <UniqueIdentifier>{3608a694-ae53-421e-bb20-b31ff89f1eee}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\CIKSolverNode">
+      <UniqueIdentifier>{99c50255-406d-47f7-8280-113405528ba9}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="PluginMain.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CMotionPathNode.cpp">
+      <Filter>Source Files\CMotionPathNode</Filter>
+    </ClCompile>
+    <ClCompile Include="CIKSolverNode.cpp">
+      <Filter>Source Files\CIKSolverNode</Filter>
+    </ClCompile>
+    <ClCompile Include="CurveIKCmd.cpp">
+      <Filter>Source Files\CMotionPathNode</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="CMotionPathNode.h">
+      <Filter>Source Files\CMotionPathNode</Filter>
+    </ClInclude>
+    <ClInclude Include="CIKSolverNode.h">
+      <Filter>Source Files\CIKSolverNode</Filter>
+    </ClInclude>
+    <ClInclude Include="CurveIKCmd.h">
+      <Filter>Source Files\CIKSolverNode</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="zMenu.mel" />
+  </ItemGroup>
+</Project>

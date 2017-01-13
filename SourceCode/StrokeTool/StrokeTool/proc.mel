@@ -1,0 +1,669 @@
+
+global proc BindSelectTrajectory()
+{
+	string $selected[] = `ls -sl`;
+    if(size($selected) > 0)
+    {
+		
+        textField -e -text $selected[0] tf_trajectory;
+    }
+}
+
+global proc BindSelectedJoint()
+{
+	string $selected[] = `ls -sl`;
+    if(size($selected) > 0)
+    {
+		
+        textField -e -text $selected[0] tf_rootJoint;
+    }
+}
+
+global proc BindSelectedJointEnd()
+{
+	string $selected[] = `ls -sl`;
+    if(size($selected) > 0)
+    {
+        textField -e -text $selected[0] tf_endJoint;
+    }
+}
+
+// LOA List
+
+global proc AddSelectedLOA()
+{
+	string $selected[] = `ls -sl`;
+    if(size($selected) > 0)
+    {
+		textScrollList -e -append $selected[0] -sc "OnSelectLOAListItem" list_loa;
+    }
+}
+
+global proc RemoveSelectedLOA()
+{
+	string $selected[] = `ls -sl`;
+    if(size($selected) > 0)
+    {
+		textScrollList -e -removeItem $selected[0] list_loa;
+    }
+}
+
+global proc CleanLOAList()
+{
+	textScrollList -e -ra list_loa;
+}
+
+
+global proc OnSelectLOAListItem()
+{
+	//string $stextScrollList
+	select -r `textScrollList -q -selectItem list_loa`;
+}
+
+//----- Bind LOA ----------
+
+// return: curveIntersect Node
+global proc string GetIntersectNode(string $c1, string $c2)
+{
+	//TODO: use direction, active view direction
+	string $node = `curveIntersect -ch on $c1 $c2`;
+	return $node;
+}
+
+
+//---------------------------
+// Self collision detection
+//--------------------------
+
+global proc float[] GetSelfIntersection(string $c)
+{
+	int $spans = getAttr ($c+".spans");
+	int $i;
+
+	float $p[];		// self intersecting point
+
+	for($i=1; $i < $spans; ++$i)
+	{
+		string $dc[] = `detachCurve -ch 1 -cos on ($c + ".u[" + $i + "]")`;
+		string $dc2[] = `detachCurve -ch 1 -cos on -rpo 1 ($dc[0] + ".u[" + ($i-0.01) + "]")`;
+
+		// curveIntersect
+		string $tmp = `curveIntersect $dc[0] $dc[1]`;
+		
+		//print $dc2[0];
+		//print $dc[1];
+
+		if($tmp != "")
+		{
+			string $split_tmp[];
+			tokenize ($tmp," ",$split_tmp);
+			float $intersect_p1 = $split_tmp[0];
+			float $intersect_p2 = $split_tmp[1];
+			$p[size($p)] = $intersect_p1;
+			$p[size($p)] = $intersect_p2;
+		}
+
+		
+		select -r $dc2[0];
+		doDelete;
+		select -r $dc[0];
+		doDelete;
+		select -r $dc[1];
+		doDelete;
+		
+	}
+	//float $uniqP[];
+	//$uniqP[0]=$p[0];
+	//$uniqP[1]=$p[1];
+	
+
+	//return $uniqP;
+	return $p;
+}
+
+//----------------------------
+
+
+
+// deform to currently selected LOA
+
+global proc DeformToLOA_Pure()
+{
+	string $root = `textField -query -text tf_rootJoint`;
+	//string $end = `textField -query -text tf_endJoint`;
+
+	string $childrenJoints[] = `listRelatives -ad $root`;
+	string $end = $childrenJoints[0];
+
+	CurveIKCmd -root $root -end $end; 
+	//registered command plugin
+	//CurveIKCmd is going to deal with the deformation
+}
+
+global proc DeformToLOA()
+{
+	select -r `textScrollList -q -selectItem list_loa`;
+
+	DeformToLOA_Pure();
+}
+
+global string $ikhandle_global;
+
+
+global proc float[] GetRollingParam(string $curveName)
+{
+
+	float $loop_p_all[] = GetSelfIntersection($curveName);
+	// (p1,p2) - one intersecting point
+
+	float $loop_p[];
+	float $current_min1 = 0;
+	float $current_min2 = 0;
+
+	int $i;
+	int $len = size($loop_p_all);
+	for($i=0; $i<$len; $i+=2)
+	{
+		float $p1 = $loop_p_all[$i];
+		float $p2 = $loop_p_all[($i+1)];
+		if($p1 > $current_min1)
+		{
+			$current_min1 = $p1 + 0.01;
+			$current_min2 = $p2 + 0.01;
+
+			$loop_p[size($loop_p)] = $p1;
+			$loop_p[size($loop_p)] = $p2;
+
+		}
+	}
+
+	//now loop self intersecting points are in $loop_p
+	return $loop_p;
+}
+
+global proc string ApplyAnimation_FlowMotionPath()
+{
+	string $curveName = `textField -query -text tf_trajectory`;
+    string $rootJointName = `textField -query -text tf_rootJoint`;
+    
+    string $childrenJoints[] = `listRelatives -ad $rootJointName`;
+    string $leafJointName = $childrenJoints[0];
+    select -r $rootJointName $leafJointName;
+    string $ikHandlesNames[] = `ikHandle -sol ikSplineSolver -ns 30`; //
+    string $ikHandleName = $ikHandlesNames[0];
+    string $ikSplineName = $ikHandlesNames[2];
+
+	global string $ikhandle_global;
+	$ikhandle_global = $ikHandleName;
+
+    xform -cp $ikSplineName; //Center spline curve pivot 
+
+    select -r $ikHandleName;
+    setAttr ($ikHandleName+".dTwistControlEnable") 1;
+
+    select -r $ikSplineName $curveName;
+
+	pathAnimation -fractionMode true -follow true -followAxis x -upAxis y -worldUpType "vector" -worldUpVector 0 1 0 -inverseUp false -inverseFront false -bank false -startTimeU `playbackOptions -query -minTime` -endTimeU  `playbackOptions -query -maxTime`;
+
+	flow -divisions 30 2 2 -objectCentered 1 -localCompute 0 -localDivisions 2 2 2 $ikSplineName;
+
+	return $ikHandleName;
+}
+
+// return ik handle name
+global proc string ApplyAnimation_TranslateOnly()
+{
+	
+	string $curveName = `textField -query -text tf_trajectory`;
+    string $rootJointName = `textField -query -text tf_rootJoint`;
+    
+    string $childrenJoints[] = `listRelatives -ad $rootJointName`;
+    string $leafJointName = $childrenJoints[0];
+    select -r $rootJointName $leafJointName;
+    string $ikHandlesNames[] = `ikHandle -sol ikSplineSolver -ns 30`;
+    string $ikHandleName = $ikHandlesNames[0];
+    string $ikSplineName = $ikHandlesNames[2];
+
+	global string $ikhandle_global;
+	$ikhandle_global = $ikHandleName;
+	xform -cp $ikSplineName;
+    select -r $ikHandleName;
+    setAttr ($ikHandleName+".dTwistControlEnable") 1;
+
+    select -r $ikSplineName $curveName;
+    
+	pathAnimation -follow false -fractionMode true -upAxis x -worldUpType "vector" -worldUpVector 0 1 0 -inverseUp false -inverseFront false -bank false -startTimeU `playbackOptions -query -minTime` -endTimeU  `playbackOptions -query -maxTime`;
+
+	return $ikHandleName;
+}
+
+
+
+// Final version of apply animation
+// 1. create motion path follow
+// 2. for loa : loa list
+//		find intersect point, param
+//		deform to loa
+//		insert keyframe (set ik fk control and blend weight)
+//		
+
+
+global proc ApplyAnimation()
+{
+	//get all joints
+	string $rootJointName = `textField -query -text tf_rootJoint`;
+	string $childrenJoints[] = `listRelatives -ad $rootJointName`;
+
+	string $curveName = `textField -query -text tf_trajectory`;
+	
+	$childrenJoints[size($childrenJoints)] = $rootJointName;		//add root to the list
+
+
+	// trajectory flow path
+	string $ikhandle = ApplyAnimation_FlowMotionPath();
+	setAttr ($ikhandle + ".ikFkManipulation", 1);
+
+	// iterate list
+	string $loa_array[] = `textScrollList -q -allItems list_loa`;
+	string $trajectory = `textField -query -text tf_trajectory`;
+	float $spans = `getAttr ($trajectory + ".spans")`;
+
+	
+
+	
+	
+	//TODO: set total_frames
+	int $blend_frames = `floatSliderGrp -q -v sld_blend`;
+	int $total_frames = `floatSliderGrp -q -v sld_total`;
+
+
+
+	for ($loa in $loa_array)
+	{
+		string $intersect_node = GetIntersectNode($trajectory, $loa);
+		float $u[] = `getAttr ($intersect_node + ".p1")`;
+
+		float $p = $u[0] / $spans;		// 0 - 1
+
+		
+
+		int $center_frame = $p * $total_frames;
+		
+		int $blend_in_frame = $center_frame - $blend_frames;
+		if($blend_in_frame <= 0) 
+		{
+			$blend_in_frame = 1;
+		}
+		int $blend_out_frame = $center_frame + $blend_frames;
+
+		//insert key frames for joints transform
+		currentTime $blend_in_frame ;
+		setAttr ($ikhandle + ".ikBlend", 1);
+		setKeyframe { ($ikhandle + ".ikb") };
+
+		
+
+		for($j in $childrenJoints)
+		{
+
+			setKeyframe {($j)};
+		}
+
+		
+		currentTime $center_frame ;
+		setAttr ($ikhandle + ".ikBlend", 0);
+		setKeyframe { ($ikhandle + ".ikb") };
+
+
+
+		currentTime $blend_out_frame ;
+		setAttr ($ikhandle + ".ikBlend", 1);
+		setKeyframe { ($ikhandle + ".ikb") };
+
+
+		for($j in $childrenJoints)
+		{
+			setKeyframe {($j)};
+		}
+
+
+		//insert key frames for ikhandle weights
+
+		currentTime ($blend_in_frame + 1) ;
+		setAttr ($ikhandle + ".ikBlend", 0);
+		setKeyframe { ($ikhandle + ".ikb") };
+
+		
+		currentTime ($blend_out_frame - 1) ;
+		setAttr ($ikhandle + ".ikBlend", 0);
+		setKeyframe { ($ikhandle + ".ikb") };
+		
+
+		// fk deform to loa
+
+		currentTime $center_frame;
+		select -r $loa;
+		DeformToLOA_Pure();
+
+		// set keyframe for each joints
+		for($j in $childrenJoints)
+		{
+			setKeyframe {($j)};
+		}
+	}
+	
+}
+
+
+global proc ApplyAnimation_Bounce()
+{
+	//get all joints
+	string $rootJointName = `textField -query -text tf_rootJoint`;
+	string $childrenJoints[] = `listRelatives -ad $rootJointName`;
+
+	string $curveName = `textField -query -text tf_trajectory`;
+	
+	$childrenJoints[size($childrenJoints)] = $rootJointName;		//add root to the list
+
+
+	// trajectory flow path
+	string $ikhandle = ApplyAnimation_TranslateOnly();
+	setAttr ($ikhandle + ".ikFkManipulation", 1);
+
+	// iterate list
+	string $loa_array[] = `textScrollList -q -allItems list_loa`;
+	string $trajectory = `textField -query -text tf_trajectory`;
+	float $spans = `getAttr ($trajectory + ".spans")`;
+
+	
+	//TODO: set total_frames
+	int $blend_frames = `floatSliderGrp -q -v sld_blend`;
+	int $total_frames = `floatSliderGrp -q -v sld_total`;
+
+
+	for ($loa in $loa_array)
+	{
+		string $intersect_node = GetIntersectNode($trajectory, $loa);
+		float $u[] = `getAttr ($intersect_node + ".p1")`;
+
+		float $p = $u[0] / $spans;		// 0 - 1
+
+		//print $u;
+
+		int $center_frame = $p * $total_frames;
+		//$center_frame_array[size($center_frame_array)] = $center_frame;
+		int $blend_in_frame = $center_frame - $blend_frames;
+		if($blend_in_frame <= 0) 
+		{
+			$blend_in_frame = 1;
+		}
+		int $blend_out_frame = $center_frame + $blend_frames;
+
+		//insert key frames for joints transform
+		currentTime $blend_in_frame ;
+		setAttr ($ikhandle + ".ikBlend", 1);
+		setKeyframe { ($ikhandle + ".ikb") };
+
+		//unlimitJointRotation($childrenJoints);
+		
+
+		for($j in $childrenJoints)
+		{
+			setKeyframe {($j)};
+		}
+
+		
+		currentTime $center_frame ;
+		setAttr ($ikhandle + ".ikBlend", 0);
+		setKeyframe { ($ikhandle + ".ikb") };
+
+
+
+		currentTime $blend_out_frame ;
+		setAttr ($ikhandle + ".ikBlend", 1);
+		setKeyframe { ($ikhandle + ".ikb") };
+
+		//unlimitJointRotation($childrenJoints);
+
+		for($j in $childrenJoints)
+		{
+			setKeyframe {($j)};
+		}
+
+
+		//insert key frames for ikhandle weights
+
+		currentTime ($blend_in_frame + 1) ;
+		setAttr ($ikhandle + ".ikBlend", 0);
+		setKeyframe { ($ikhandle + ".ikb") };
+
+		//limitJointRotation($childrenJoints);
+		
+		currentTime ($blend_out_frame - 1) ;
+		setAttr ($ikhandle + ".ikBlend", 0);
+		setKeyframe { ($ikhandle + ".ikb") };
+
+		// fk deform to loa
+
+		currentTime $center_frame;
+		select -r $loa;
+		DeformToLOA_Pure();
+
+		// set keyframe for each joints
+		for($j in $childrenJoints)
+		{
+			setKeyframe {($j)};
+		}
+	}
+}
+
+global proc ApplyAnimation_Twist()
+{
+	
+}
+
+global proc ApplyAnimation_Rolling()
+{
+	string $rootJointName = `textField -query -text tf_rootJoint`;
+	string $childrenJoints[] = `listRelatives -ad $rootJointName`;
+	string $curveName = `textField -query -text tf_trajectory`;
+	$childrenJoints[size($childrenJoints)] = $rootJointName;		//add root to the list
+	string $loa_array[] = `textScrollList -q -allItems list_loa`;
+	string $trajectory = `textField -query -text tf_trajectory`;
+	int $blend_frames = `floatSliderGrp -q -v sld_blend`;
+	int $total_frames = `floatSliderGrp -q -v sld_total`;
+	string $ikhandle = ApplyAnimation_FlowMotionPath();
+	setAttr ($ikhandle + ".ikFkManipulation", 1);
+	float $spans = `getAttr ($trajectory + ".spans")`;
+	//Rolling generate
+	float $loop_p[] = GetRollingParam($curveName);
+	
+
+	int $i;
+	int $len = size($loop_p);
+	for($i=0; $i<$len; $i+=2)
+	{
+		float $p_in = $loop_p[$i];
+		float $p_out = $loop_p[$i+1];
+		
+		int $blend_in_frame= $p_in / $spans * $total_frames;
+		
+
+		if($blend_in_frame <= 0) 
+		{
+			$blend_in_frame = 1;
+		}
+
+		int $blend_out_frame = $p_out / $spans * $total_frames;
+		int $center_frame = ($blend_in_frame+$blend_out_frame)/2;
+		currentTime $blend_in_frame ;
+		setAttr ($ikhandle + ".ikBlend", 1);
+		setKeyframe { ($ikhandle + ".ikb") };
+
+		float $in_x = `getAttr ($rootJointName+".translateX")`;
+		float $root_rz_in = `getAttr ($rootJointName + ".rotateZ")`;
+		for($j in $childrenJoints)
+		{
+
+			setKeyframe {($j)};
+		}
+
+		
+		currentTime $center_frame ;
+		setAttr ($ikhandle + ".ikBlend", 0);
+		setKeyframe { ($ikhandle + ".ikb") };
+
+		currentTime $blend_out_frame ;
+		setAttr ($ikhandle + ".ikBlend", 1);
+		setKeyframe { ($ikhandle + ".ikb") };
+
+		float $out_x = `getAttr ($rootJointName+".translateX")`;
+
+		float $root_rz_out = `getAttr ($rootJointName + ".rotateZ")`;
+		setAttr ($rootJointName + ".rotateZ") ($root_rz_out);
+		
+
+		for($j in $childrenJoints)
+		{
+			setKeyframe {($j)};
+		}
+
+
+		//insert key frames for ikhandle weights
+		
+		currentTime ($blend_in_frame + 1) ;
+		setAttr ($ikhandle + ".ikBlend", 0);
+		setKeyframe { ($ikhandle + ".ikb") };
+		
+		currentTime ($blend_out_frame - 1) ;
+		setAttr ($ikhandle + ".ikBlend", 0);
+		setKeyframe { ($ikhandle + ".ikb") };
+
+		// fk deform to loa
+		
+		currentTime $center_frame;
+
+		float $intersect_position[] = `pointOnCurve -pr $p_in -p $curveName`;
+
+		setAttr ($rootJointName+ ".translateX") ($intersect_position[0]);
+		setAttr ($rootJointName+ ".translateY") ($intersect_position[1]);
+		setAttr ($rootJointName+ ".translateZ") ($intersect_position[2]);
+		setAttr ($rootJointName + ".rotateZ") (($root_rz_in + $root_rz_out)/2);
+		setKeyframe {($rootJointName)};
+		
+	}
+}
+
+
+
+// ----------- Main menu ---------------------
+
+global proc ToolMainMenu()
+{
+	if (`window -exists toolWindow`) deleteUI toolWindow;
+
+	window -title "Stroke Tool" -widthHeight 700 480 toolWindow;
+
+	columnLayout -adj 1;
+
+	rowLayout 
+		-numberOfColumns 3 
+		-columnWidth3 200 200 200 
+		-columnAlign3 "center" "center" "center";
+	text -l "Trajectory Stroke" t_trajectory;
+	text -l "Shape Root Joint" t_rootJoint;
+	//text -l "Shape End Effect Joint" t_endJoint;
+
+	setParent ..;
+
+	rowLayout 
+		-numberOfColumns 3 
+		-columnWidth3 200 200 200 
+		-columnAlign3 "center" "center" "center";
+
+	textField -ed false -w 200 tf_trajectory;
+	textField -ed false -w 200 tf_rootJoint;
+	//textField -ed false -w 200 tf_endJoint;
+
+	setParent ..;
+
+	rowLayout 
+		-numberOfColumns 3 
+		-columnWidth3 200 200 200 
+		-columnAlign3 "center" "center" "center";
+
+	
+	button -l "Bind Selected Stroke" -command "BindSelectTrajectory" btn_trajectory;
+	button -l "Bind Selected Joint" -command "BindSelectedJoint" btn_rootJoint;
+	//button -l "Bind Selected Joint" -command "BindSelectedJointEnd" btn_endJoint;
+
+	setParent ..;
+
+
+	rowLayout;
+	floatSliderGrp -label "loa blend frame" -field true -value 10 -min 1 -max 10 -fieldMinValue 1 -fieldMaxValue 100 sld_blend;
+	setParent ..;
+
+	rowLayout;
+	floatSliderGrp -label "total animation frames" -field true -value 120 -min 1 -max 120 -fieldMinValue 1 -fieldMaxValue 500 sld_total;
+	setParent ..;
+
+
+	//----- LOA menu list
+	rowLayout;
+	text -l "List of Refine Item (LOA and Twist Point)";
+	setParent ..;
+
+
+	rowLayout
+		-numberOfColumns 3
+		-columnWidth3 300 150 150 
+		-columnAlign3 "center" "center" "center";
+
+	textScrollList list_loa;
+
+	columnLayout;
+	button -l "Add Items" -command "AddSelectedLOA" btn_add_loa;
+	button -l "Remove Items" -command "RemoveSelectedLOA" btn_remove_loa;
+	button -l "Clean" -command "CleanLOAList" btn_clean_loa;
+
+	button -l "Deform LOA" -command "DeformToLOA" btn_deform_loa;
+
+	//button -l "Deform And Blend" -command "DeformToLOA_Blend" btn_deform_blend;
+	button -l "Add twist point" -command "" btn_twist;
+
+	setParent ..;
+	columnLayout;
+	button -l "Apply_Refinement" -command "ApplyAnimation" btn_apply;
+	button -l "Apply_PathFollowing" -command "ApplyAnimation_FlowMotionPath" btn_apply_PathFlowing;
+	button -l "Apply_TranslateOnly" -command "ApplyAnimation_TranslateOnly" btn_apply_TranslateOnly;
+	button -l "Apply_Bounce" -command "ApplyAnimation_Bounce" btn_apply2;
+	button -l "Apply_Rolling" -command "ApplyAnimation_Rolling" btn_apply_rolling; //chage latter
+	button -l "Apply_Twist" -command "ApplyAnimation_Twist" btn_apply_PathFlowingWithTwist;
+
+	setParent ..;
+	setParent ..;
+
+
+	//the animation curve editor
+	//tearOffPanel "Graph Editor" "graphEditor" true;
+
+	showWindow toolWindow;
+}
+
+
+global string $nameMenu;
+
+global proc createMenu()
+{
+    global string $nameMenu;
+    $nameMenu=`menu -label "StrokeTool" -parent "MayaWindow"`;
+
+	menuItem -label "StrokeTool Menu" -command "ToolMainMenu()";
+}
+
+global proc deleteMenu()
+{
+    global string $nameMenu;
+    deleteUI -m $nameMenu;
+}
