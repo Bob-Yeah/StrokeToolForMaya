@@ -1,4 +1,4 @@
-
+//begin
 global proc BindSelectTrajectory()
 {
 	string $selected[] = `ls -sl`;
